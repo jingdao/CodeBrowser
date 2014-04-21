@@ -1,22 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define USE_WINDOWS 0
-#define TEST_SIZE 100000
-#define BUFFER_SIZE 256
-#if defined _WIN32 && USE_WINDOWS
-#include <windows.h>
-#endif
-#ifdef __linux
 #include <dirent.h>
 #include <unistd.h>
+#define TEST_SIZE 100000
+#define BUFFER_SIZE 256
+#define MAX_PRINT_LINES 100
 #define DT_DIR 4
 #define DT_REG 8
 #define FILE_NAME_COLOR "\x1B[94m"
 #define LINE_NUMBER_COLOR "\x1B[96m"
 #define NORMAL_COLOR "\x1B[0m"
 #define HIGHLIGHT_COLOR "\x1B[91m"
-#endif
 
 #include "Map.h"
 
@@ -30,12 +25,14 @@ char *realpath(const char *path, char *resolved_path);
 
 Map* allTokens;
 HashTable* allLinesFromFile;
-char directory_name[BUFFER_SIZE];
+char* directory_name = NULL;
 int countTokens = 0;
 int countDirectories = 0;
+int countLines = 0;
 
 Entry* newEntry(char* path, int lineNumber) {
 	Entry *e = malloc(sizeof(Entry));
+	//printf("malloc Entry: %d\n",sizeof(Entry));
 	if (!e) return NULL;
 	e->path = path;
 	e->lineNumber = lineNumber;
@@ -52,9 +49,15 @@ char* getRandomString() {
 }
 
 char* newString(char* c, unsigned int length) {
-	char* res = malloc((length+1)*sizeof(char));
-	for (unsigned int i=0;i<length;i++) res[i]=c[i];
-	res[length]='\0';
+	int firstNonWhitespace=0;
+	for (unsigned int i=0;i<length;i++) {
+		if (c[i]==' '||c[i]=='\t') firstNonWhitespace++;
+		else break;
+	}
+	char* res = malloc((length-firstNonWhitespace+1)*sizeof(char));
+	//printf("malloc char: %d\n",(length-firstNonWhitespace+1)*sizeof(char));
+	for (unsigned int i=0;i<length-firstNonWhitespace;i++) res[i]=c[i+firstNonWhitespace];
+	res[length-firstNonWhitespace]='\0';
 	return res;
 }
 
@@ -76,17 +79,41 @@ void findAllOccurences(char* key) {
 	List* ls = GetListFromMap(allTokens,key);
 	if (ls) {
 		printf("    %d occurences of '%s' found\n",ls->size,key);
+		if (ls->size>MAX_PRINT_LINES) {
+			printf("    Too many results to display.\n");
+			return;
+		}
 		for (unsigned int i=0;i<ls->size;i++) {
-			Entry* li = GetListItem(ls,i);
+			Entry* li = GetListItem(ls,i); 
 			List* linesFromFile = FindInHashTable(allLinesFromFile,li->path);
 			char* line = GetListItem(linesFromFile,li->lineNumber-1); //decrement lineNumber by 1 because of zero-indexing
 			if (!li||!line||!linesFromFile) printf("Warning: null pointer or index out of bounds!\n");
 			else {
-				unsigned int formattedLineLength = strlen(line)+strlen(HIGHLIGHT_COLOR)+strlen(NORMAL_COLOR)+1;
+				unsigned int formattedLineLength = strlen(line)+strlen(HIGHLIGHT_COLOR)+strlen(NORMAL_COLOR)+3;
 				char* formattedLine = malloc(formattedLineLength*sizeof(char));
-				snprintf(formattedLine,formattedLineLength,"%s%s%s",HIGHLIGHT_COLOR,line,NORMAL_COLOR);
+				char* token = malloc(BUFFER_SIZE*sizeof(char));
+				char* leftSubstring = malloc(BUFFER_SIZE*sizeof(char));
+				char* rightSubstring = malloc(BUFFER_SIZE*sizeof(char));
+				unsigned int i,tokenIndex=0;
+				for (i=0;i<strlen(line);i++) {
+					if (!line[i]||line[i]=='\n') break;
+					else if (line[i]=='_'||line[i]>='A'&&line[i]<='Z'||
+						line[i]>='a'&&line[i]<='z'||tokenIndex>0&&line[i]>='0'&&line[i]<='9') {
+						token[tokenIndex++]=line[i];
+					} else if (tokenIndex>0) {
+						token[tokenIndex]='\0';
+						if (strcmp(key,token)==0) break;
+						else tokenIndex=0;
+					}
+				}
+				strncpy(leftSubstring,line,i-tokenIndex); leftSubstring[i-tokenIndex]='\0';
+				strcpy(rightSubstring,line+i);
+				snprintf(formattedLine,formattedLineLength,"%s%s%s%s%s",leftSubstring,HIGHLIGHT_COLOR,key,NORMAL_COLOR,rightSubstring);
 				printf("%s%s:%s%d%s %s\n",FILE_NAME_COLOR,li->path,LINE_NUMBER_COLOR,li->lineNumber,NORMAL_COLOR,formattedLine);
 				free(formattedLine);
+				free(token);
+				free(leftSubstring);
+				free(rightSubstring);
 			}
 		}
 	} else {
@@ -98,13 +125,15 @@ int parseFromFile(char* fileName) {
 	FILE *pFile;
 	char string[BUFFER_SIZE];
 	char token[BUFFER_SIZE];
-	char filePathBuffer[BUFFER_SIZE];
+	char* fullpath = NULL;
 
-	if (!realpath(fileName,filePathBuffer)) {
+	fullpath = realpath(fileName,NULL);
+	if (!fullpath) {
 		printf("Error getting path for file %s\n",fileName);
 		return 0;
 	}
-	char* filepath = newString(filePathBuffer+strlen(directory_name)+1,strlen(filePathBuffer)-strlen(directory_name)-1);
+	char* filepath = newString(fullpath+strlen(directory_name)+1,strlen(fullpath)-strlen(directory_name)-1);
+	free(fullpath);
 	List* linesFromFile = InitList();
 	pFile = fopen(fileName , "r");
 	if (!pFile) {
@@ -116,17 +145,25 @@ int parseFromFile(char* fileName) {
 		//printf("Reading file %s ......\n",fileName);
 		while(fgets(string , BUFFER_SIZE , pFile)) {
 			//printf("Line %d: %s",lineNumber, string);
+			Entry* thisLine = newEntry(filepath,lineNumber);
 			unsigned int i;
 			for (i=0;i<BUFFER_SIZE;i++) {
-				if (!string[i]||string[i]=='\n') break;
-				else if (string[i]=='_'||string[i]>='A'&&string[i]<='Z'||
+				if (!string[i]) break;
+				else if (string[i]=='\n') {
+					if (tokenIndex>0) {
+						token[tokenIndex]='\0';
+						tokenIndex=0;
+						countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
+					}
+					break;
+				} else if (string[i]=='_'||string[i]>='A'&&string[i]<='Z'||
 					string[i]>='a'&&string[i]<='z'||tokenIndex>0&&string[i]>='0'&&string[i]<='9') {
 					token[tokenIndex++]=string[i];
 				} else if (tokenIndex>0) {
 					token[tokenIndex]='\0';
 					//printf("%s ",token);
 					tokenIndex=0;
-					countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
+					countTokens+=AddToMap(allTokens,token,thisLine);
 				}
 			}
 			//printf("\n");
@@ -138,6 +175,7 @@ int parseFromFile(char* fileName) {
 		//printf("Inserted %d items to linesFromFile\n",countLines);
 		fclose(pFile);
 		InsertIntoHashTable(allLinesFromFile,filepath,linesFromFile);
+		countLines+=lineNumber;
 	}
 
 	return 1;
@@ -249,16 +287,9 @@ void testInsert() {
 
 int main(int argc, char* argv[]) {
 	if (argc < 2 || argc > 3) {
-		printf("Usage: CodeBrowser [filters,] directory_name\n    e.g. CodeBrowser '*.c,*.h' /source/code/folder/\n");
+		printf("Usage: CodeBrowser [filters,] directory_name\n  e.g. CodeBrowser '*.c,*.h' /source/code/folder/\n       CodeBrowser 'string.h' /usr/include/\n");
 		return 1;
 	}
-
-#ifdef _WIN32
-	printf("Running on windows ...\n");
-#endif
-#ifdef __linux
-	printf("Running on linux ...\n");
-#endif
 
 	//testInsert();
 	allTokens = InitMap();
@@ -284,7 +315,8 @@ int main(int argc, char* argv[]) {
 		selected_directory=argv[2];
 	}
 
-	if (!realpath(selected_directory,directory_name)) {
+	directory_name = realpath(selected_directory,NULL);
+	if (!directory_name) {
 		printf("Error getting path for directory %s\n",selected_directory);
 		return 0;
 	}
@@ -297,11 +329,12 @@ int main(int argc, char* argv[]) {
 		printf("Cannot parse directory %s!\n",directory_name);
 		return 1;
 	}
-	printf("Inserted %d tokens from %d files in %d directories. Unique tokens: %d\n",countTokens,allLinesFromFile->load,countDirectories,allTokens->size);
+	printf("Inserted %d tokens from %d lines in %d files in %d directories. Unique tokens: %d\n",countTokens,countLines,allLinesFromFile->load,countDirectories,allTokens->size);
 
 	char bf[BUFFER_SIZE];
 	printf(">>");
-	while (scanf("%s",bf)==1) {
+	while (fgets(bf,BUFFER_SIZE,stdin)) {
+		if (bf[strlen(bf)-1] == '\n') bf[strlen(bf)-1] = '\0';
 		findAllOccurences(bf);
 		printf("\n>>");
 	}

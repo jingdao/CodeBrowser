@@ -4,6 +4,7 @@ int insert(HashTable* tb, int intKey, void* entry);
 
 HashTable* InitHashTable() {
 	HashTable* tb = malloc(sizeof(HashTable));
+	//printf("malloc HashTable: %d\n",sizeof(HashTable)+sizeof(int)+INITIAL_TABLE_SIZE*(sizeof(void*)+sizeof(int)));
 	if (!tb) return NULL;
 	//claims a section of the heap to be used as dummy variable
 	tb->dummy = malloc(sizeof(int));
@@ -68,6 +69,7 @@ void DoubleHashTable(HashTable* tb) {
 	int newSize = (tb->size+1)*2-1; //approximate doubling with chance of prime number
 	int* newKeys = malloc(newSize * sizeof(int));
 	void** newEntries = malloc(newSize*sizeof(void*));
+	//printf("malloc double HashTable: %d\n",newSize * sizeof(int)+sizeof(void*));
 	int* oldKeys = tb->keys;
 	void** oldEntries = tb->entries;
 	unsigned int oldSize = tb->size;

@@ -1,7 +1,8 @@
 #include "List.h"
 
 List* InitList() {
-	List* ls = malloc(sizeof(ls));
+	List* ls = malloc(sizeof(List));
+	//printf("malloc List: %d\n",sizeof(List)+INITIAL_LIST_SIZE*sizeof(void*));
 	if (!ls) return NULL;
 	ls->entries = malloc(INITIAL_LIST_SIZE*sizeof(void*));
 	if (!ls->entries) {
@@ -29,6 +30,7 @@ int AppendToList(List* ls, void* entry) {
 	if (ls->maxSize==ls->size) {
 		//printf("Now doubling size of list\n");
 		void** newEntries = malloc(ls->maxSize*2*sizeof(void*));
+		//printf("malloc double List: %d\n",ls->maxSize*2*sizeof(void*));
 		if (!newEntries) {
 			printf("Warning(List): Unable to resize table!\n");
 			return 0;

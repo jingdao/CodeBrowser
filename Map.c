@@ -2,6 +2,7 @@
 
 Map* InitMap() {
 	Map* mp = malloc(sizeof(Map));
+	//printf("malloc Map: %d\n",sizeof(Map));
 	if (!mp) return NULL;
 	mp->tb = InitHashTable();
 	mp->size = 0;

@@ -3,16 +3,15 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <time.h>
 #define TEST_SIZE 100000
 #define BUFFER_SIZE 256
 #define MAX_PRINT_LINES 100
-#define DT_DIR 4
-#define DT_REG 8
 #define FILE_NAME_COLOR "\x1B[94m"
 #define LINE_NUMBER_COLOR "\x1B[96m"
 #define NORMAL_COLOR "\x1B[0m"
 #define HIGHLIGHT_COLOR "\x1B[91m"
-
+#define SUMMARY_COLOR "\x1B[92m"
 #include "Map.h"
 
 
@@ -21,14 +20,14 @@ typedef struct {
 	int lineNumber;
 } Entry;
 
-char *realpath(const char *path, char *resolved_path);
-
 Map* allTokens;
-HashTable* allLinesFromFile;
+HashTable* allLinesFromFile; //faster than Map for consecutive inserts on the same List
 char* directory_name = NULL;
 int countTokens = 0;
 int countDirectories = 0;
 int countLines = 0;
+struct timespec start;
+struct timespec end;
 
 Entry* newEntry(char* path, int lineNumber) {
 	Entry *e = malloc(sizeof(Entry));
@@ -41,7 +40,8 @@ Entry* newEntry(char* path, int lineNumber) {
 
 char* getRandomString() {
 	char* res = malloc(10*sizeof(char));
-	for (int i=0;i<9;i++) {
+	int i;
+	for (i=0;i<9;i++) {
 		res[i]=rand()%24+65;
 	}
 	res[9]='\0';
@@ -50,13 +50,14 @@ char* getRandomString() {
 
 char* newString(char* c, unsigned int length) {
 	int firstNonWhitespace=0;
-	for (unsigned int i=0;i<length;i++) {
+	unsigned int i;
+	for (i=0;i<length;i++) {
 		if (c[i]==' '||c[i]=='\t') firstNonWhitespace++;
 		else break;
 	}
 	char* res = malloc((length-firstNonWhitespace+1)*sizeof(char));
 	//printf("malloc char: %d\n",(length-firstNonWhitespace+1)*sizeof(char));
-	for (unsigned int i=0;i<length-firstNonWhitespace;i++) res[i]=c[i+firstNonWhitespace];
+	for (i=0;i<length-firstNonWhitespace;i++) res[i]=c[i+firstNonWhitespace];
 	res[length-firstNonWhitespace]='\0';
 	return res;
 }
@@ -76,14 +77,15 @@ int matchString(char* filter, char* text) {
 }
 
 void findAllOccurences(char* key) {
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&start);
 	List* ls = GetListFromMap(allTokens,key);
 	if (ls) {
-		printf("    %d occurences of '%s' found\n",ls->size,key);
 		if (ls->size>MAX_PRINT_LINES) {
-			printf("    Too many results to display.\n");
+			printf("\n    %sQuery complete. Too many results (%d) to display.%s\n\n",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
 			return;
 		}
-		for (unsigned int i=0;i<ls->size;i++) {
+		unsigned int i;
+		for (i=0;i<ls->size;i++) {
 			Entry* li = GetListItem(ls,i); 
 			List* linesFromFile = FindInHashTable(allLinesFromFile,li->path);
 			char* line = GetListItem(linesFromFile,li->lineNumber-1); //decrement lineNumber by 1 because of zero-indexing
@@ -116,6 +118,10 @@ void findAllOccurences(char* key) {
 				free(rightSubstring);
 			}
 		}
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
+		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
+		printf("\n    %sQuery complete (%.3fms) %d occurences of '%s' found%s\n\n",
+			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
 	} else {
 		printf("    no occurence of '%s' found\n",key);
 	}
@@ -145,7 +151,6 @@ int parseFromFile(char* fileName) {
 		//printf("Reading file %s ......\n",fileName);
 		while(fgets(string , BUFFER_SIZE , pFile)) {
 			//printf("Line %d: %s",lineNumber, string);
-			Entry* thisLine = newEntry(filepath,lineNumber);
 			unsigned int i;
 			for (i=0;i<BUFFER_SIZE;i++) {
 				if (!string[i]) break;
@@ -163,7 +168,7 @@ int parseFromFile(char* fileName) {
 					token[tokenIndex]='\0';
 					//printf("%s ",token);
 					tokenIndex=0;
-					countTokens+=AddToMap(allTokens,token,thisLine);
+					countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
 				}
 			}
 			//printf("\n");
@@ -171,8 +176,6 @@ int parseFromFile(char* fileName) {
 			AppendToList(linesFromFile,ns);
 			lineNumber++;
 		}
-		//printf("Inserted %d tokens. Unique tokens: %d\n",countTokens,allTokens->size);
-		//printf("Inserted %d items to linesFromFile\n",countLines);
 		fclose(pFile);
 		InsertIntoHashTable(allLinesFromFile,filepath,linesFromFile);
 		countLines+=lineNumber;
@@ -203,7 +206,8 @@ int parseFromDirectory(List* filters) {
 			continue;
 		} else if (current->d_type==DT_REG) {
 			if (filters) {
-				for (unsigned int i=0;i<filters->size;i++) {
+				unsigned int i;
+				for (i=0;i<filters->size;i++) {
 					if(matchString(GetListItem(filters,i),fn)) {
 						if (!parseFromFile(fn)) {
 							printf("Cannot parse file %s!\n",fn);
@@ -252,7 +256,8 @@ void testInsert() {
 	char* str[TEST_SIZE];
 	int count = 0;
 	srand(10000);
-	for (int i = 0; i < TEST_SIZE; i++) {
+	int i;
+	for (i = 0; i < TEST_SIZE; i++) {
 		str[i] = getRandomString();
 		arr[i] = newEntry("",i);
 		count+=InsertIntoHashTable(tb,str[i], arr[i]);
@@ -260,25 +265,25 @@ void testInsert() {
 	printf("Inserted %d items. Final load: %d/%d\n", count,tb->load,tb->size);
 	printf("Try to find inserted keys \n");
 	count = 0;
-	for (int i = 0; i < TEST_SIZE; i++) {
+	for (i = 0; i < TEST_SIZE; i++) {
 		if (FindInHashTable(tb, str[i]) == arr[i]) count++;
 	}
 	printf("Found %d items.\n",count);
 	printf("try to delete multiple keys\n");
 	count = 0;
-	for (int i = 0; i < TEST_SIZE; i+=2) {
+	for (i = 0; i < TEST_SIZE; i+=2) {
 		count += RemoveFromHashTable(tb, str[i]);
 	}
 	printf("Deleted %d items. Final load: %d/%d\n", count, tb->load, tb->size);
 	printf("Try to find inserted keys \n");
 	count = 0;
-	for (int i = 0; i < TEST_SIZE; i++) {
+	for (i = 0; i < TEST_SIZE; i++) {
 		if (FindInHashTable(tb, str[i]) == arr[i]) count++;
 	}
 	printf("Found %d items.\n", count);
 	free(first);
 	free(second);
-	for (int i = 0; i < TEST_SIZE; i++) {
+	for (i = 0; i < TEST_SIZE; i++) {
 		free(arr[i]);
 	}
 	DeleteHashTable(tb);
@@ -325,11 +330,15 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	printf("Reading from directory %s ...\n",directory_name);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&start);
 	if (!parseFromDirectory(filters)) {
 		printf("Cannot parse directory %s!\n",directory_name);
 		return 1;
 	}
-	printf("Inserted %d tokens from %d lines in %d files in %d directories. Unique tokens: %d\n",countTokens,countLines,allLinesFromFile->load,countDirectories,allTokens->size);
+	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
+	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
+	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
+	printf("Inserted %d tokens (%d unique) from %d lines, %d files, %d directories.\n",countTokens,allTokens->size,countLines,allLinesFromFile->load,countDirectories);
 
 	char bf[BUFFER_SIZE];
 	printf(">>");
@@ -338,8 +347,8 @@ int main(int argc, char* argv[]) {
 		findAllOccurences(bf);
 		printf("\n>>");
 	}
-
-	for (unsigned int i=0; i<allLinesFromFile->size; i++) {
+	unsigned int i;
+	for (i=0; i<allLinesFromFile->size; i++) {
 		void* ls = allLinesFromFile->entries[i];
 		if (ls&&ls!=allLinesFromFile->dummy) DeleteList(ls);	
 	}

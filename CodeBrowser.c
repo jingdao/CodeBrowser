@@ -26,6 +26,8 @@ char* directory_name = NULL;
 int countTokens = 0;
 int countDirectories = 0;
 int countLines = 0;
+unsigned int memData = 0;
+unsigned int memPointers = 0;
 struct timespec start;
 struct timespec end;
 
@@ -48,6 +50,17 @@ char* getRandomString() {
 	return res;
 }
 
+char* getMemoryRepr(char* buffer, unsigned int i) {
+	if (i>=10000000) {
+		sprintf(buffer,"%4uMB",i/1000000);
+	} else if (i>=10000) {
+		sprintf(buffer,"%4uKB",i/1000);
+	} else {
+		sprintf(buffer,"%4uB",i);
+	}
+	return buffer;
+}
+
 char* newString(char* c, unsigned int length) {
 	int firstNonWhitespace=0;
 	unsigned int i;
@@ -57,6 +70,7 @@ char* newString(char* c, unsigned int length) {
 	}
 	char* res = malloc((length-firstNonWhitespace+1)*sizeof(char));
 	//printf("malloc char: %d\n",(length-firstNonWhitespace+1)*sizeof(char));
+	memData+=(length-firstNonWhitespace+1)*sizeof(char);
 	for (i=0;i<length-firstNonWhitespace;i++) res[i]=c[i+firstNonWhitespace];
 	res[length-firstNonWhitespace]='\0';
 	return res;
@@ -151,6 +165,7 @@ int parseFromFile(char* fileName) {
 		//printf("Reading file %s ......\n",fileName);
 		while(fgets(string , BUFFER_SIZE , pFile)) {
 			//printf("Line %d: %s",lineNumber, string);
+			Entry* thisLine = newEntry(filepath,lineNumber);
 			unsigned int i;
 			for (i=0;i<BUFFER_SIZE;i++) {
 				if (!string[i]) break;
@@ -158,7 +173,7 @@ int parseFromFile(char* fileName) {
 					if (tokenIndex>0) {
 						token[tokenIndex]='\0';
 						tokenIndex=0;
-						countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
+						countTokens+=AddToMap(allTokens,token,thisLine);
 					}
 					break;
 				} else if (string[i]=='_'||string[i]>='A'&&string[i]<='Z'||
@@ -301,6 +316,7 @@ int main(int argc, char* argv[]) {
 	allLinesFromFile = InitHashTable();
 	List* filters;
 	char* selected_directory;
+	char bf[BUFFER_SIZE];
 
 	if (argc==2) {
 		filters=NULL;
@@ -337,10 +353,12 @@ int main(int argc, char* argv[]) {
 	}
 	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
 	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
+	memPointers+=sizeof(Map)*2+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->size)+sizeof(Entry)*countTokens;
 	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
-	printf("Inserted %d tokens (%d unique) from %d lines, %d files, %d directories.\n",countTokens,allTokens->size,countLines,allLinesFromFile->load,countDirectories);
+	printf("Found %d tokens (%d unique) in %d lines/%d files/%d dirs.\n",countTokens,allTokens->size,countLines,allLinesFromFile->load,countDirectories);
+	printf("Memory estimate: %s (data) ",getMemoryRepr(bf,memData));
+	printf("%s (pointers)\n",getMemoryRepr(bf,memPointers));
 
-	char bf[BUFFER_SIZE];
 	printf(">>");
 	while (fgets(bf,BUFFER_SIZE,stdin)) {
 		if (bf[strlen(bf)-1] == '\n') bf[strlen(bf)-1] = '\0';

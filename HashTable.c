@@ -27,7 +27,8 @@ HashTable* InitHashTable() {
 	}
 	tb->size = INITIAL_TABLE_SIZE;
 	tb->load = 0;
-	for (unsigned int i = 0; i < tb->size; i++) {
+	unsigned int i;
+	for (i = 0; i < tb->size; i++) {
 		tb->keys[i] = -1;
 		tb->entries[i] = NULL;
 	}
@@ -81,11 +82,12 @@ void DoubleHashTable(HashTable* tb) {
 	tb->entries = newEntries;
 	tb->size =newSize;
 	tb->load = 0;
-	for (unsigned int i = 0; i < tb->size; i++) {
+	unsigned int i;
+	for (i = 0; i < tb->size; i++) {
 		tb->keys[i] = -1;
 		tb->entries[i] = NULL;
 	}
-	for (unsigned int i = 0; i < oldSize; i++) {
+	for (i = 0; i < oldSize; i++) {
 		if (oldEntries[i] && oldEntries[i] != tb->dummy)
 			insert(tb, oldKeys[i], oldEntries[i]);
 	}
@@ -97,7 +99,8 @@ void DoubleHashTable(HashTable* tb) {
 int insert(HashTable* tb, int intKey, void* entry) {
 	int h = baseHash(tb->size, intKey);
 	int step = stepHash(tb->size, intKey);
-	for (unsigned int i = 0; i < tb->size; i++) {
+	unsigned int i;
+	for (i = 0; i < tb->size; i++) {
 		//printf("key: %d hash: %d\n", intKey, h);
 		if (!tb->entries[h] || tb->entries[h] == tb->dummy) {
 			tb->keys[h] = intKey;
@@ -132,7 +135,8 @@ void* FindInHashTable(HashTable* tb, char* key) {
 	int intKey = getIntKey(key);
 	int h = baseHash(tb->size, intKey);
 	int step = stepHash(tb->size, intKey);
-	for (unsigned int i = 0; i < tb->size; i++) {
+	unsigned int i;
+	for (i = 0; i < tb->size; i++) {
 		//printf("key: %d hash: %d\n", intKey, h);
 		if (!tb->entries[h]) {
 			return NULL;
@@ -154,7 +158,8 @@ int RemoveFromHashTable(HashTable* tb, char* key) {
 	int intKey = getIntKey(key);
 	int h = baseHash(tb->size, intKey);
 	int step = stepHash(tb->size, intKey);
-	for (unsigned int i = 0; i < tb->size; i++) {
+	unsigned int i;
+	for (i = 0; i < tb->size; i++) {
 		//printf("key: %d hash: %d\n", intKey, h);
 		if (!tb->entries[h]) {
 			return 0;

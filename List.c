@@ -11,7 +11,8 @@ List* InitList() {
 	}
 	ls->maxSize = INITIAL_LIST_SIZE;
 	ls->size = 0;
-	for (unsigned int i = 0; i < ls->maxSize; i++) {
+	unsigned int i;
+	for (i = 0; i < ls->maxSize; i++) {
 		ls->entries[i] = NULL;
 	}
 	return ls;
@@ -35,10 +36,11 @@ int AppendToList(List* ls, void* entry) {
 			printf("Warning(List): Unable to resize table!\n");
 			return 0;
 		}
-		for (unsigned int i=0;i<ls->size;i++) {
+		unsigned int i;
+		for (i=0;i<ls->size;i++) {
 			newEntries[i]=ls->entries[i];
 		}
-		for (unsigned int i=ls->size;i<ls->size*2;i++) {
+		for (i=ls->size;i<ls->size*2;i++) {
 			newEntries[i]=NULL;
 		}
 		free(ls->entries);

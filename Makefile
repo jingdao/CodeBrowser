@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = 
-LDFLAGS = -lrt
+CFLAGS = -O2 
+LDFLAGS = -lrt /usr/lib/x86_64-linux-gnu/libmagic.so.1
 SOURCES = Map.c List.c HashTable.c
 ALL_SOURCES = CodeBrowser.c $(SOURCES)
 HEADERS = Map.h List.h HashTable.h

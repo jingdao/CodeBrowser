@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <time.h>
+#include "magic.h"
 #define TEST_SIZE 100000
 #define BUFFER_SIZE 256
 #define MAX_PRINT_LINES 100
@@ -12,24 +13,35 @@
 #define NORMAL_COLOR "\x1B[0m"
 #define HIGHLIGHT_COLOR "\x1B[91m"
 #define SUMMARY_COLOR "\x1B[92m"
+#define TIMING_MODE CLOCK_MONOTONIC
 #include "Map.h"
-
+//TODO: improve comment filtering, 
 
 typedef struct {
 	char* path;
 	int lineNumber;
 } Entry;
-
-Map* allTokens;
-HashTable* allLinesFromFile; //faster than Map for consecutive inserts on the same List
+enum parseMode {
+	TEXT_MODE, SYMBOL_MODE
+};
+Map* allTokens = NULL;
+HashTable* allLinesFromFile = NULL; //faster than Map for consecutive inserts on the same List
 char* directory_name = NULL;
 int countTokens = 0;
 int countDirectories = 0;
 int countLines = 0;
+int countLibraries = 0;
+int countExcluded = 0;
 unsigned int memData = 0;
 unsigned int memPointers = 0;
+int currentMode = TEXT_MODE;
+int recursiveMode = 0;
+int ignoreComment = 0;
+int maxPrintLines = MAX_PRINT_LINES;
 struct timespec start;
 struct timespec end;
+magic_t cookie;
+char* mime_type;
 
 Entry* newEntry(char* path, int lineNumber) {
 	Entry *e = malloc(sizeof(Entry));
@@ -77,25 +89,54 @@ char* newString(char* c, unsigned int length) {
 }
 
 int matchString(char* filter, char* text) {
-	while(*filter&&*text) {
-		if (*filter=='*') {
-			if (*(filter+1)==*text) filter++;
-			else text++;
+	if (*filter||*text) {
+		if (*filter=='*'&&*(filter+1)!='\0'&&*text=='\0') return 0;
+		if (*filter==*text) return matchString(filter+1,text+1);
+		if (*filter=='*') return matchString(filter+1,text) || matchString(filter,text+1);
+		return 0;
+	} else return 1;
+}
+
+int isComment(char* line) {
+	while(*line) {
+		if (*line==' ') line++;
+		if (*line=='#') return 1;
+		else return 0;
+	} 
+	return 0;
+}
+
+void findSymbolLocations(char* key) {
+	clock_gettime(TIMING_MODE,&start);
+	List* ls = GetListFromMap(allTokens,key);
+	if (ls) {
+		if (ls->size>maxPrintLines) {
+			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
+			return;
 		}
-		else if(*filter==*text) {
-			filter++; text++;
-		} else return 0;
+		unsigned int i;
+		for (i=0;i<ls->size;i++) {
+			char* fi = GetListItem(ls,i); 
+			if (!fi) printf("Warning: null pointer or index out of bounds!\n");
+			else {
+				printf("%s%s: %s%s%s\n",FILE_NAME_COLOR,fi,HIGHLIGHT_COLOR,key,NORMAL_COLOR);
+			}
+		}
+		clock_gettime(TIMING_MODE,&end);
+		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
+		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
+			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
+	} else {
+		printf("    no occurence of '%s' found\n",key);
 	}
-	if (*filter=='*') filter++;
-	return *filter==*text;
 }
 
 void findAllOccurences(char* key) {
 	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&start);
 	List* ls = GetListFromMap(allTokens,key);
 	if (ls) {
-		if (ls->size>MAX_PRINT_LINES) {
-			printf("\n    %sQuery complete. Too many results (%d) to display.%s\n\n",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
+		if (ls->size>maxPrintLines) {
+			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
 			return;
 		}
 		unsigned int i;
@@ -134,11 +175,49 @@ void findAllOccurences(char* key) {
 		}
 		clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
 		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
-		printf("\n    %sQuery complete (%.3fms) %d occurences of '%s' found%s\n\n",
+		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
 			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
 	} else {
 		printf("    no occurence of '%s' found\n",key);
 	}
+}
+
+int parseSymbolsFromFile(char* fileName) {
+	FILE *f;
+	char buffer[BUFFER_SIZE];
+	char* token;
+	char* fullpath;
+	int validLibrary = 0;
+	
+	if (strncmp("application",magic_file(cookie,fileName),11)!=0) return 0;
+	fullpath = realpath(fileName,NULL);
+	if (!fullpath) {
+		printf("Error getting path for file %s\n",fileName);
+		return 0;
+	}
+	char* filepath = newString(fullpath+strlen(directory_name)+1,strlen(fullpath)-strlen(directory_name)-1);
+	free(fullpath);
+	sprintf(buffer,"nm -D --defined-only -f posix %s 2>/dev/null",fileName);
+	f = popen(buffer,"r");
+	if (f) {
+		//printf("Reading file %s ......\n",fileName);
+		while (fgets(buffer,BUFFER_SIZE,f)) {
+			token = strchr(buffer,' ');
+			if (token&&(*(token+1)=='T'||*(token+1)=='W'||*(token+1)=='B'||*(token+1)=='D')) {
+				validLibrary=1;
+				*token = '\0';
+				//printf("%s\n",buffer);
+				countTokens+=AddToMap(allTokens,buffer,filepath);
+			}
+		}
+		pclose(f);
+		countLibraries+=validLibrary;
+		return 1;
+	} else {
+		printf("Error opening file %s\n",fileName);
+		return 0;
+	}
+	
 }
 
 int parseFromFile(char* fileName) {
@@ -147,6 +226,7 @@ int parseFromFile(char* fileName) {
 	char token[BUFFER_SIZE];
 	char* fullpath = NULL;
 
+	if (strncmp("text",magic_file(cookie,fileName),4)!=0) return 0;
 	fullpath = realpath(fileName,NULL);
 	if (!fullpath) {
 		printf("Error getting path for file %s\n",fileName);
@@ -165,6 +245,7 @@ int parseFromFile(char* fileName) {
 		//printf("Reading file %s ......\n",fileName);
 		while(fgets(string , BUFFER_SIZE , pFile)) {
 			//printf("Line %d: %s",lineNumber, string);
+			if (ignoreComment&&isComment(string)) continue;
 			Entry* thisLine = newEntry(filepath,lineNumber);
 			unsigned int i;
 			for (i=0;i<BUFFER_SIZE;i++) {
@@ -199,7 +280,7 @@ int parseFromFile(char* fileName) {
 	return 1;
 } 
 
-int parseFromDirectory(List* filters) {
+int parseFromDirectory(List* inc_filters, List* exc_filters) {
 	struct dirent *current;
 	DIR *d;
 	d = opendir(".");
@@ -209,30 +290,38 @@ int parseFromDirectory(List* filters) {
 	}
 	while(current = readdir(d)) {
 		char* fn = current->d_name;
-		if (matchString(".",fn)||matchString("..",fn)) continue;
-		if (current->d_type==DT_DIR) {
+		if (strcmp(".",fn)==0||strcmp("..",fn)==0) continue;
+		if (recursiveMode&&current->d_type==DT_DIR) {
 			if (chdir(current->d_name)!=0) {
 				printf("Cannot change directory to %s!\n",current->d_name);
 			} else {
 				//printf("Reading from directory %s ...\n",current->d_name);
-				parseFromDirectory(filters);
-				chdir("..");
+				parseFromDirectory(inc_filters,exc_filters);
+				if (chdir("..")) printf("Cannot go up from %s!\n",current->d_name); 
 			}
 			continue;
 		} else if (current->d_type==DT_REG) {
-			if (filters) {
-				unsigned int i;
-				for (i=0;i<filters->size;i++) {
-					if(matchString(GetListItem(filters,i),fn)) {
-						if (!parseFromFile(fn)) {
-							printf("Cannot parse file %s!\n",fn);
-						}
-						break;
+			unsigned int i;
+			if (exc_filters) {
+				for (i=0;i<exc_filters->size;i++) {
+					if(matchString(GetListItem(exc_filters,i),fn)) {
+						countExcluded++; break;
 					}
 				}
-			} else if (!parseFromFile(fn)) {
-				printf("Cannot parse file %s!\n",fn);
-				return 0;
+			} 
+			if (!exc_filters||i==exc_filters->size) {
+				if (inc_filters) {
+					for (i=0;i<inc_filters->size;i++) {
+						if(matchString(GetListItem(inc_filters,i),fn)) {
+							if (currentMode==SYMBOL_MODE) parseSymbolsFromFile(fn);
+							else parseFromFile(fn);
+							break;
+						}
+					}
+				} else {
+					if (currentMode==SYMBOL_MODE) parseSymbolsFromFile(fn);
+					else parseFromFile(fn);
+				}
 			}
 		}
 	}
@@ -304,38 +393,98 @@ void testInsert() {
 	DeleteHashTable(tb);
 }
 
+void testMatchString() {
+	printf("%d\n",matchString("*a*","abcde"));
+	printf("%d\n",matchString("*e*","abcde"));
+	printf("%d\n",matchString("**","abcde"));
+	printf("%d\n",matchString("*","abcde"));
+	printf("%d\n",matchString("a*c*e","abcde"));
+	printf("%d\n",matchString("a*c*d","abcde"));
+	printf("%d\n",matchString("libSDL*.so.*","libSDL-1.2.so.0.11.3"));
+}
+
+void printUsage() {
+	printf("Usage: CodeBrowser [-i include] [-x exclude] [-f file] [-m results] [-tsrn] [directory_name]\n"
+				"  optns:  -i include files that match pattern (* as wildcard)\n"
+				"          -x exclude files that match pattern (* as wildcard)\n"
+				"          -f writes data to file (reads from file if directory_name omitted)\n"
+				"          -m maximum number of search results to print (default 100)\n"
+				"          -t text mode (default, read text files)\n"
+				"          -s symbol mode (read symbols from shared objects)\n"
+				"          -r recursively read from directories\n"
+				"          -n ignore comments\n"
+				"          directory_name (current directory is the default)\n" 
+				"  e.g. CodeBrowser -i '*.c,*.h' /source/code/folder/\n"
+				"       CodeBrowser -x 'string.h' /usr/include/\n"
+				"       CodeBrowser -sri 'lib*.so*' /lib\n");
+}
 
 int main(int argc, char* argv[]) {
-	if (argc < 2 || argc > 3) {
-		printf("Usage: CodeBrowser [filters,] directory_name\n  e.g. CodeBrowser '*.c,*.h' /source/code/folder/\n       CodeBrowser 'string.h' /usr/include/\n");
-		return 1;
-	}
-
-	//testInsert();
-	allTokens = InitMap();
-	allLinesFromFile = InitHashTable();
-	List* filters;
+	int s;
+	char *included = NULL;
+	char *excluded = NULL;
+	char* maxLines = NULL;
+	List* inc_filters = NULL;
+	List* exc_filters = NULL;
 	char* selected_directory;
 	char bf[BUFFER_SIZE];
+	while ((s=getopt(argc,argv,"i:x:f:m:tsrn"))!=-1) {
+		switch (s) {
+			case 't': currentMode = TEXT_MODE; break;
+			case 's': currentMode = SYMBOL_MODE; break;
+			case 'r': recursiveMode = 1; break;
+			case 'n': ignoreComment = 1; break;
+			case 'i': included = optarg; break;
+			case 'x': excluded = optarg; break;
+			case 'm': maxLines = optarg; break;
+			case '?': printUsage(); return 1;
+			default: printUsage(); return 1;
+		}
+	}
+	if (optind<argc) selected_directory = argv[optind];
+	else selected_directory = ".";
+	
+	//testMatchString();
+	//testInsert();
+	cookie = magic_open(MAGIC_MIME_TYPE);
+	if (!cookie||magic_load(cookie,NULL)) {
+		printf("Error loading magic number database\n");
+		return 1;
+	}
+	allTokens= InitMap();
+	if (currentMode==TEXT_MODE)
+		allLinesFromFile = InitHashTable();
 
-	if (argc==2) {
-		filters=NULL;
-		selected_directory=argv[1];
-	} else {
-		filters = InitList();
+	if (included) {
+		inc_filters = InitList();
 		int i=0;
 		char c;
-		while (c = *(argv[1])) {
+		while (c = *included) {
 			if (c==',') {
-				if (i>0) AppendToList(filters,newString(argv[1]-i,i));
+				if (i>0) AppendToList(inc_filters,newString(included-i,i));
 				i=0;
 			} else i++;
-			argv[1]++;
+			included++;
 		}
-		if (i>0) AppendToList(filters,newString(argv[1]-i,i));
-		selected_directory=argv[2];
+		if (i>0) AppendToList(inc_filters,newString(included-i,i));
 	}
-
+	if (excluded) {
+		exc_filters = InitList();
+		int i=0;
+		char c;
+		while (c = *excluded) {
+			if (c==',') {
+				if (i>0) AppendToList(exc_filters,newString(excluded-i,i));
+				i=0;
+			} else i++;
+			excluded++;
+		}
+		if (i>0) AppendToList(exc_filters,newString(excluded-i,i));
+	}
+	if (maxLines) {
+		maxPrintLines = atoi(maxLines);
+		if (maxPrintLines<=0) maxPrintLines=MAX_PRINT_LINES;
+	}
 	directory_name = realpath(selected_directory,NULL);
 	if (!directory_name) {
 		printf("Error getting path for directory %s\n",selected_directory);
@@ -346,33 +495,44 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	printf("Reading from directory %s ...\n",directory_name);
-	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&start);
-	if (!parseFromDirectory(filters)) {
+	clock_gettime(TIMING_MODE,&start);
+	if (!parseFromDirectory(inc_filters,exc_filters)) {
 		printf("Cannot parse directory %s!\n",directory_name);
 		return 1;
 	}
-	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
-	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
-	memPointers+=sizeof(Map)*2+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->size)+sizeof(Entry)*countTokens;
-	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
-	printf("Found %d tokens (%d unique) in %d lines/%d files/%d dirs.\n",countTokens,allTokens->size,countLines,allLinesFromFile->load,countDirectories);
+	if (currentMode==SYMBOL_MODE) {
+		printf("Found %d symbols (%d unique).\n",countTokens,allTokens->size);
+		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countLibraries,countExcluded,countDirectories);
+		memPointers+=sizeof(Map)+sizeof(HashTable)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
+	} else {
+		printf("Found %d tokens (%d unique) in %d lines.\n",countTokens,allTokens->size,countLines);
+		printf("Included: %d Excluded: %d Dirs: %d\n",allLinesFromFile->load,countExcluded,countDirectories);
+		memPointers+=sizeof(Map)+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->load)+sizeof(Entry)*countTokens+sizeof(void*)*(allTokens->tb->size+allLinesFromFile->size);
+	}
 	printf("Memory estimate: %s (data) ",getMemoryRepr(bf,memData));
 	printf("%s (pointers)\n",getMemoryRepr(bf,memPointers));
+	clock_gettime(TIMING_MODE,&end);
+	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
+	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
 
+	//writeStringListToHTL("test.htl",FindInHashTable(allLinesFromFile,"Map.h"));
+	//readFromHTL("test.htl");
 	printf(">>");
 	while (fgets(bf,BUFFER_SIZE,stdin)) {
+		if (strlen(bf)<=1) break;
 		if (bf[strlen(bf)-1] == '\n') bf[strlen(bf)-1] = '\0';
-		findAllOccurences(bf);
+		if (currentMode==SYMBOL_MODE) findSymbolLocations(bf);
+		else findAllOccurences(bf);
 		printf("\n>>");
 	}
 	unsigned int i;
 	for (i=0; i<allLinesFromFile->size; i++) {
 		void* ls = allLinesFromFile->entries[i];
+
 		if (ls&&ls!=allLinesFromFile->dummy) DeleteList(ls);	
 	}
 	DeleteHashTable(allLinesFromFile);
 	DeleteMap(allTokens);
 
-	//printf("Using input path: %s\n", argv[1]);
 	return 0;
 }

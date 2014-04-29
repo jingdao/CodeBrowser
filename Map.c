@@ -15,7 +15,8 @@ Map* InitMap() {
 
 void DeleteMap(Map* mp) {
 	if (!mp) return;
-	for (unsigned int i=0; i<mp->tb->size; i++) {
+	unsigned int i;
+	for (i=0; i<mp->tb->size; i++) {
 		void* ls = mp->tb->entries[i];
 		if (ls&&ls!=mp->tb->dummy) DeleteList(ls);	
 	}

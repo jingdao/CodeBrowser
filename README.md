@@ -5,35 +5,46 @@ for keywords. Builds up a hashtable of keywords to lines-of-text mappings
 to support efficient querying. Search time is O(1) but memory consumption
 is O(n).
 
-	Usage: CodeBrowser [filters,] directory_name
-  		e.g. CodeBrowser '*.c,*.h' /source/code/folder/
-       		     CodeBrowser 'string.h' /usr/include/
-
+	Usage: CodeBrowser [-i include] [-x exclude] [-f file] [-m results] [-tsrn] [directory_name]
+	  optns:  -i include files that match pattern (* as wildcard)
+	          -x exclude files that match pattern (* as wildcard)
+		  -m maximum number of search results to print (default 100)
+	          -t text mode (default, read text files)
+	          -s symbol mode (read symbols from shared objects)
+	          -r recursively read from directories
+	          -n ignore comments
+	          directory_name (current directory is the default)
+ 	 e.g. CodeBrowser -i '*.c,*.h' /source/code/folder/
+	       CodeBrowser -x 'string.h' /usr/include/
+	       CodeBrowser -sri 'lib*.so*' /lib
 Features
 --------
 - color highlighting
-- filter for certain filenames/extensions
+- filter filenames/extensions to be included or excluded
+- optionally read directories recursively
+- symbol mode allows querying objects symbols instead of plain text
+- ignore comments (experimental)
 
 Example
 -------
 
-	jingdao@jingdao-K45VD:~/cProjects/CodeBrowser$ ./CodeBrowser "*.h" /usr/include
+	jingdao:CodeBrowser$ ./CodeBrowser -i "*.h" /usr/include
 	Reading from directory /usr/include ...
-	Inserted 1264488 tokens from 378174 lines in 1629 files in 120 directories. Unique tokens: 115078
+	Found 131161 tokens (15526 unique) in 30498 lines.
+	Included: 122 Excluded: 0 Dirs: 1
+	Memory estimate: 1066KB (data) 2877KB (pointers)
+	Parsing completed (303.010ms)
+	
 	>>strxfrm
-    		3 occurences of 'strxfrm' found
-		langinfo.h:237 This information is accessed by the strcoll and strxfrm functions.
-		c++/4.8/bits/locale_classes.h:649 *  This function is a wrapper for strxfrm functionality.  It takes the
-		string.h:150 extern size_t strxfrm (char *__restrict __dest,
-
+	langinfo.h:237 This information is accessed by the strcoll and strxfrm functions.
+	string.h:150 extern size_t strxfrm (char *__restrict __dest,
+	    Query complete (0.077ms) 2 occurences of 'strxfrm' found
+	
 	>>chdir
-    		4 occurences of 'chdir' found
-		fts.h:108 #define	FTS_DONTCHDIR	 0x01		/* don't chdir .. to the parent */
-		X11/Xw32defs.h:15 #  define chdir	_chdir
-		unistd.h:497 extern int chdir (const char *__path) __THROW __nonnull ((1)) __wur;
-		unistd.h:957 terminal.  If NOCHDIR is zero, do `chdir ("/")'.  If NOCLOSE is zero,
-
+	fts.h:108 #define	FTS_DONTCHDIR	 0x01		/* don't chdir .. to the parent */
+	unistd.h:497 extern int chdir (const char *__path) __THROW __nonnull ((1)) __wur;
+	unistd.h:957 terminal.  If NOCHDIR is zero, do `chdir ("/")'.  If NOCLOSE is zero,
+	    Query complete (0.063ms) 3 occurences of 'chdir' found
+	
 	>>NULL
-    		752 occurences of 'NULL' found
-    		Too many results to display.
-
+	    Query complete. Too many results (159) to display.

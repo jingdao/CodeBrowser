@@ -11,12 +11,14 @@ is O(n).
 		  -m maximum number of search results to print (default 100)
 	          -t text mode (default, read text files)
 	          -s symbol mode (read symbols from shared objects)
+	          -f file mode (search for file names)
 	          -r recursively read from directories
 	          -n ignore comments
 	          directory_name (current directory is the default)
  	 e.g. CodeBrowser -i '*.c,*.h' /source/code/folder/
 	       CodeBrowser -x 'string.h' /usr/include/
 	       CodeBrowser -sri 'lib*.so*' /lib
+	       CodeBrowser -rf /home	
 Features
 --------
 - color highlighting

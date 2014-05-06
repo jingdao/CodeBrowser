@@ -22,7 +22,7 @@ typedef struct {
 	int lineNumber;
 } Entry;
 enum parseMode {
-	TEXT_MODE, SYMBOL_MODE
+	TEXT_MODE, SYMBOL_MODE, FILE_MODE
 };
 Map* allTokens = NULL;
 HashTable* allLinesFromFile = NULL; //faster than Map for consecutive inserts on the same List
@@ -106,6 +106,31 @@ int isComment(char* line) {
 	return 0;
 }
 
+void findAllNames(char* key) {
+	clock_gettime(TIMING_MODE,&start);
+	List* ls = GetListFromMap(allTokens,key);
+	if (ls) {
+		if (ls->size>maxPrintLines) {
+			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
+			return;
+		}
+		unsigned int i;
+		for (i=0;i<ls->size;i++) {
+			char* fi = GetListItem(ls,i); 
+			if (!fi) printf("Warning: null pointer or index out of bounds!\n");
+			else {
+				printf("%s%s: %s%s%s\n",FILE_NAME_COLOR,fi,HIGHLIGHT_COLOR,key,NORMAL_COLOR);
+			}
+		}
+		clock_gettime(TIMING_MODE,&end);
+		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
+		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
+			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
+	} else {
+		printf("    no occurence of '%s' found\n",key);
+	}
+}
+
 void findSymbolLocations(char* key) {
 	clock_gettime(TIMING_MODE,&start);
 	List* ls = GetListFromMap(allTokens,key);
@@ -180,6 +205,15 @@ void findAllOccurences(char* key) {
 	} else {
 		printf("    no occurence of '%s' found\n",key);
 	}
+}
+
+int parseNamesFromFile(char* fileName) {
+	char* fullpath = realpath(fileName,NULL);
+	if (!fullpath) {
+		printf("Error getting path for file %s\n",fileName);
+		return 0;
+	}
+	countTokens+=AddToMap(allTokens,fileName,fullpath);
 }
 
 int parseSymbolsFromFile(char* fileName) {
@@ -314,12 +348,14 @@ int parseFromDirectory(List* inc_filters, List* exc_filters) {
 					for (i=0;i<inc_filters->size;i++) {
 						if(matchString(GetListItem(inc_filters,i),fn)) {
 							if (currentMode==SYMBOL_MODE) parseSymbolsFromFile(fn);
+							else if (currentMode==FILE_MODE) parseNamesFromFile(fn);
 							else parseFromFile(fn);
 							break;
 						}
 					}
 				} else {
 					if (currentMode==SYMBOL_MODE) parseSymbolsFromFile(fn);
+					else if (currentMode==FILE_MODE) parseNamesFromFile(fn);
 					else parseFromFile(fn);
 				}
 			}
@@ -407,10 +443,10 @@ void printUsage() {
 	printf("Usage: CodeBrowser [-i include] [-x exclude] [-f file] [-m results] [-tsrn] [directory_name]\n"
 				"  optns:  -i include files that match pattern (* as wildcard)\n"
 				"          -x exclude files that match pattern (* as wildcard)\n"
-				"          -f writes data to file (reads from file if directory_name omitted)\n"
 				"          -m maximum number of search results to print (default 100)\n"
 				"          -t text mode (default, read text files)\n"
 				"          -s symbol mode (read symbols from shared objects)\n"
+				"          -f file mode (search for file names)\n"
 				"          -r recursively read from directories\n"
 				"          -n ignore comments\n"
 				"          directory_name (current directory is the default)\n" 
@@ -428,10 +464,11 @@ int main(int argc, char* argv[]) {
 	List* exc_filters = NULL;
 	char* selected_directory;
 	char bf[BUFFER_SIZE];
-	while ((s=getopt(argc,argv,"i:x:f:m:tsrn"))!=-1) {
+	while ((s=getopt(argc,argv,"i:x:m:tsrnf"))!=-1) {
 		switch (s) {
 			case 't': currentMode = TEXT_MODE; break;
 			case 's': currentMode = SYMBOL_MODE; break;
+			case 'f': currentMode = FILE_MODE; break;
 			case 'r': recursiveMode = 1; break;
 			case 'n': ignoreComment = 1; break;
 			case 'i': included = optarg; break;
@@ -504,6 +541,10 @@ int main(int argc, char* argv[]) {
 		printf("Found %d symbols (%d unique).\n",countTokens,allTokens->size);
 		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countLibraries,countExcluded,countDirectories);
 		memPointers+=sizeof(Map)+sizeof(HashTable)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
+	} else if (currentMode==FILE_MODE) {
+		printf("Found %d filenames (%d unique).\n",countTokens,allTokens->size);
+		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countTokens,countExcluded,countDirectories);
+		memPointers+=sizeof(Map)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
 	} else {
 		printf("Found %d tokens (%d unique) in %d lines.\n",countTokens,allTokens->size,countLines);
 		printf("Included: %d Excluded: %d Dirs: %d\n",allLinesFromFile->load,countExcluded,countDirectories);
@@ -522,6 +563,7 @@ int main(int argc, char* argv[]) {
 		if (strlen(bf)<=1) break;
 		if (bf[strlen(bf)-1] == '\n') bf[strlen(bf)-1] = '\0';
 		if (currentMode==SYMBOL_MODE) findSymbolLocations(bf);
+		else if (currentMode==FILE_MODE) findAllNames(bf);
 		else findAllOccurences(bf);
 		printf("\n>>");
 	}

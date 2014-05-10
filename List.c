@@ -30,20 +30,12 @@ int AppendToList(List* ls, void* entry) {
 	char* ns = entry;
 	if (ls->maxSize==ls->size) {
 		//printf("Now doubling size of list\n");
-		void** newEntries = malloc(ls->maxSize*2*sizeof(void*));
+		void** newEntries = realloc(ls->entries,ls->maxSize*2*sizeof(void*));
 		//printf("malloc double List: %d\n",ls->maxSize*2*sizeof(void*));
 		if (!newEntries) {
 			printf("Warning(List): Unable to resize table!\n");
 			return 0;
 		}
-		unsigned int i;
-		for (i=0;i<ls->size;i++) {
-			newEntries[i]=ls->entries[i];
-		}
-		for (i=ls->size;i<ls->size*2;i++) {
-			newEntries[i]=NULL;
-		}
-		free(ls->entries);
 		ls->entries = newEntries;
 		ls->maxSize *= 2;
 	}

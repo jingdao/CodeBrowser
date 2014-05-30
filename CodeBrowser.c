@@ -15,7 +15,6 @@
 #define SUMMARY_COLOR "\x1B[92m"
 #define TIMING_MODE CLOCK_MONOTONIC
 #include "Map.h"
-//TODO: improve comment filtering, 
 
 typedef struct {
 	char* path;
@@ -32,8 +31,8 @@ int countDirectories = 0;
 int countLines = 0;
 int countLibraries = 0;
 int countExcluded = 0;
-unsigned int memData = 0;
-unsigned int memPointers = 0;
+//unsigned int memData = 0;
+//unsigned int memPointers = 0;
 int currentMode = TEXT_MODE;
 int recursiveMode = 0;
 int ignoreComment = 0;
@@ -74,17 +73,12 @@ char* getMemoryRepr(char* buffer, unsigned int i) {
 }
 
 char* newString(char* c, unsigned int length) {
-	int firstNonWhitespace=0;
+	char* res = malloc((length+1)*sizeof(char));
+	//printf("malloc char: %d\n",(length+1)*sizeof(char));
+	//memData+=(length+1)*sizeof(char);
 	unsigned int i;
-	for (i=0;i<length;i++) {
-		if (c[i]==' '||c[i]=='\t') firstNonWhitespace++;
-		else break;
-	}
-	char* res = malloc((length-firstNonWhitespace+1)*sizeof(char));
-	//printf("malloc char: %d\n",(length-firstNonWhitespace+1)*sizeof(char));
-	memData+=(length-firstNonWhitespace+1)*sizeof(char);
-	for (i=0;i<length-firstNonWhitespace;i++) res[i]=c[i+firstNonWhitespace];
-	res[length-firstNonWhitespace]='\0';
+	memcpy(res,c,length);
+	res[length]='\0';
 	return res;
 }
 
@@ -97,12 +91,25 @@ int matchString(char* filter, char* text) {
 	} else return 1;
 }
 
-int isComment(char* line) {
-	while(*line) {
+int filterLine(char* buffer) {
+	/*while(*line) {
 		if (*line==' ') line++;
 		if (*line=='#') return 1;
 		else return 0;
 	} 
+	return 0;*/
+	/*int i;
+	int startText=0;
+	int endText=0;
+	int whitespace=1;
+	for (i=0;i<BUFFER_SIZE;i++) {
+		if (!*buffer) break;
+		if (whitespace&&!(*buffer==' '||*buffer=='\t'||*buffer=='\n')) whitespace=0;
+		if (whitespace) startText++;
+		buffer++;
+	}
+	if (whitespace) return -1;
+	else return startText;*/
 	return 0;
 }
 
@@ -256,7 +263,7 @@ int parseSymbolsFromFile(char* fileName) {
 
 int parseFromFile(char* fileName) {
 	FILE *pFile;
-	char string[BUFFER_SIZE];
+	char lineBuffer[BUFFER_SIZE];
 	char token[BUFFER_SIZE];
 	char* fullpath = NULL;
 
@@ -277,33 +284,36 @@ int parseFromFile(char* fileName) {
 		int lineNumber=1;
 		int tokenIndex=0;
 		//printf("Reading file %s ......\n",fileName);
-		while(fgets(string , BUFFER_SIZE , pFile)) {
+		while(fgets(lineBuffer , BUFFER_SIZE , pFile)) {
 			//printf("Line %d: %s",lineNumber, string);
-			if (ignoreComment&&isComment(string)) continue;
-			Entry* thisLine = newEntry(filepath,lineNumber);
-			unsigned int i;
-			for (i=0;i<BUFFER_SIZE;i++) {
-				if (!string[i]) break;
-				else if (string[i]=='\n') {
-					if (tokenIndex>0) {
+			int offset = filterLine(lineBuffer);
+			if (offset>=0) {
+				char* string=&(lineBuffer[offset]);
+				Entry* thisLine = newEntry(filepath,lineNumber);
+				unsigned int i;
+				for (i=0;i<BUFFER_SIZE;i++) {
+					if (!string[i]) break;
+					else if (string[i]=='\n') {
+						if (tokenIndex>0) {
+							token[tokenIndex]='\0';
+							tokenIndex=0;
+							countTokens+=AddToMap(allTokens,token,thisLine);
+						}
+						break;
+					} else if (string[i]=='_'||string[i]>='A'&&string[i]<='Z'||
+						string[i]>='a'&&string[i]<='z'||tokenIndex>0&&string[i]>='0'&&string[i]<='9') {
+						token[tokenIndex++]=string[i];
+					} else if (tokenIndex>0) {
 						token[tokenIndex]='\0';
+						//printf("%s ",token);
 						tokenIndex=0;
-						countTokens+=AddToMap(allTokens,token,thisLine);
+						countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
 					}
-					break;
-				} else if (string[i]=='_'||string[i]>='A'&&string[i]<='Z'||
-					string[i]>='a'&&string[i]<='z'||tokenIndex>0&&string[i]>='0'&&string[i]<='9') {
-					token[tokenIndex++]=string[i];
-				} else if (tokenIndex>0) {
-					token[tokenIndex]='\0';
-					//printf("%s ",token);
-					tokenIndex=0;
-					countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
 				}
+				//printf("\n");
+				char* ns = newString(string,i);
+				AppendToList(linesFromFile,ns);
 			}
-			//printf("\n");
-			char* ns = newString(string,i);
-			AppendToList(linesFromFile,ns);
 			lineNumber++;
 		}
 		fclose(pFile);
@@ -440,7 +450,7 @@ void testMatchString() {
 }
 
 void printUsage() {
-	printf("Usage: CodeBrowser [-i include] [-x exclude] [-f file] [-m results] [-tsrn] [directory_name]\n"
+	printf("Usage: CodeBrowser [-i include] [-x exclude] [-m results] [-tsfrnm] [directory_name]\n"
 				"  optns:  -i include files that match pattern (* as wildcard)\n"
 				"          -x exclude files that match pattern (* as wildcard)\n"
 				"          -m maximum number of search results to print (default 100)\n"
@@ -448,7 +458,8 @@ void printUsage() {
 				"          -s symbol mode (read symbols from shared objects)\n"
 				"          -f file mode (search for file names)\n"
 				"          -r recursively read from directories\n"
-				"          -n ignore comments\n"
+				"          -n ignore C-style comments '/*,*/,//'\n"
+				"          -m ignore script-style comments '#'\n"
 				"          directory_name (current directory is the default)\n" 
 				"  e.g. CodeBrowser -i '*.c,*.h' /source/code/folder/\n"
 				"       CodeBrowser -x 'string.h' /usr/include/\n"
@@ -537,23 +548,32 @@ int main(int argc, char* argv[]) {
 		printf("Cannot parse directory %s!\n",directory_name);
 		return 1;
 	}
+	clock_gettime(TIMING_MODE,&end);
+	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
 	if (currentMode==SYMBOL_MODE) {
 		printf("Found %d symbols (%d unique).\n",countTokens,allTokens->size);
 		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countLibraries,countExcluded,countDirectories);
-		memPointers+=sizeof(Map)+sizeof(HashTable)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
+		//memPointers+=sizeof(Map)+sizeof(HashTable)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
 	} else if (currentMode==FILE_MODE) {
 		printf("Found %d filenames (%d unique).\n",countTokens,allTokens->size);
 		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countTokens,countExcluded,countDirectories);
-		memPointers+=sizeof(Map)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
+		//memPointers+=sizeof(Map)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
 	} else {
 		printf("Found %d tokens (%d unique) in %d lines.\n",countTokens,allTokens->size,countLines);
 		printf("Included: %d Excluded: %d Dirs: %d\n",allLinesFromFile->load,countExcluded,countDirectories);
-		memPointers+=sizeof(Map)+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->load)+sizeof(Entry)*countTokens+sizeof(void*)*(allTokens->tb->size+allLinesFromFile->size);
+		//memPointers+=sizeof(Map)+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->load)+sizeof(Entry)*countTokens+sizeof(void*)*(allTokens->tb->size+allLinesFromFile->size);
 	}
-	printf("Memory estimate: %s (data) ",getMemoryRepr(bf,memData));
-	printf("%s (pointers)\n",getMemoryRepr(bf,memPointers));
-	clock_gettime(TIMING_MODE,&end);
-	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
+	//printf("Memory estimate: %s (data) ",getMemoryRepr(bf,memData));
+	//printf("%s (pointers)\n",getMemoryRepr(bf,memPointers));
+	FILE *f = fopen("/proc/self/statm","r");
+	unsigned int vmsize,vmrss;
+	if(f){
+		if (fscanf(f,"%u %u",&vmsize,&vmrss)==2) {
+			printf("VmSize: %s ",getMemoryRepr(bf,vmsize*4000));
+			printf("VmRSS: %s\n",getMemoryRepr(bf,vmrss*4000));
+		}
+		fclose(f);
+	}
 	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
 
 	//writeStringListToHTL("test.htl",FindInHashTable(allLinesFromFile,"Map.h"));

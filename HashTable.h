@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define STRING_HASH_CONSTANT 5381
 #define BASE_HASH_CONSTANT 0.618033988

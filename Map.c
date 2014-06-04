@@ -1,7 +1,7 @@
 #include "Map.h"
 
 Map* InitMap() {
-	Map* mp = malloc(sizeof(Map));
+	Map* mp = (Map*)malloc(sizeof(Map));
 	//printf("malloc Map: %d\n",sizeof(Map));
 	if (!mp) return NULL;
 	mp->tb = InitHashTable();

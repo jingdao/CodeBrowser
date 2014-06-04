@@ -3,22 +3,22 @@
 int insert(HashTable* tb, int intKey, void* entry);
 
 HashTable* InitHashTable() {
-	HashTable* tb = malloc(sizeof(HashTable));
+	HashTable* tb = (HashTable*)malloc(sizeof(HashTable));
 	//printf("malloc HashTable: %d\n",sizeof(HashTable)+sizeof(int)+INITIAL_TABLE_SIZE*(sizeof(void*)+sizeof(int)));
 	if (!tb) return NULL;
 	//claims a section of the heap to be used as dummy variable
-	tb->dummy = malloc(sizeof(int));
+	tb->dummy = (int*)malloc(sizeof(int));
 	if (!tb->dummy) {
 		free(tb);
 		return NULL;
 	}
-	tb->keys = malloc(INITIAL_TABLE_SIZE*sizeof(int));
+	tb->keys = (int*)malloc(INITIAL_TABLE_SIZE*sizeof(int));
 	if (!tb->keys) {
 		free(tb);
 		free(tb->dummy);
 		return NULL;
 	}
-	tb->entries = malloc(INITIAL_TABLE_SIZE*sizeof(void*));
+	tb->entries = (void**)malloc(INITIAL_TABLE_SIZE*sizeof(void*));
 	if (!tb->entries) {
 		free(tb);
 		free(tb->dummy);
@@ -30,8 +30,9 @@ HashTable* InitHashTable() {
 	unsigned int i;
 	for (i = 0; i < tb->size; i++) {
 		tb->keys[i] = -1;
-		tb->entries[i] = NULL;
+		// tb->entries[i] = NULL;
 	}
+	memset(tb->entries,'\0',tb->size*sizeof(void*));
 	return tb;
 }
 
@@ -68,8 +69,8 @@ void DoubleHashTable(HashTable* tb) {
 	//printf("Now doubling size of hash table\n");
 	//int newSize = tb->size*2;
 	int newSize = (tb->size+1)*2-1; //approximate doubling with chance of prime number
-	int* newKeys = malloc(newSize * sizeof(int));
-	void** newEntries = malloc(newSize*sizeof(void*));
+	int* newKeys = (int*)malloc(newSize * sizeof(int));
+	void** newEntries = (void**)malloc(newSize*sizeof(void*));
 	//printf("malloc double HashTable: %d\n",newSize * sizeof(int)+sizeof(void*));
 	int* oldKeys = tb->keys;
 	void** oldEntries = tb->entries;
@@ -85,8 +86,9 @@ void DoubleHashTable(HashTable* tb) {
 	unsigned int i;
 	for (i = 0; i < tb->size; i++) {
 		tb->keys[i] = -1;
-		tb->entries[i] = NULL;
+		// tb->entries[i] = NULL;
 	}
+	memset(tb->entries,'\0',tb->size*sizeof(void*));
 	for (i = 0; i < oldSize; i++) {
 		if (oldEntries[i] && oldEntries[i] != tb->dummy)
 			insert(tb, oldKeys[i], oldEntries[i]);

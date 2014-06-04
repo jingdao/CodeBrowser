@@ -15,6 +15,7 @@
 #define SUMMARY_COLOR "\x1B[92m"
 #define TIMING_MODE CLOCK_MONOTONIC
 #include "Map.h"
+#include "Profiler.h"
 
 typedef struct {
 	char* path;
@@ -31,8 +32,6 @@ int countDirectories = 0;
 int countLines = 0;
 int countLibraries = 0;
 int countExcluded = 0;
-//unsigned int memData = 0;
-//unsigned int memPointers = 0;
 int currentMode = TEXT_MODE;
 int recursiveMode = 0;
 int ignoreComment = 0;
@@ -41,9 +40,10 @@ struct timespec start;
 struct timespec end;
 magic_t cookie;
 char* mime_type;
+Timer* timer;
 
 Entry* newEntry(char* path, int lineNumber) {
-	Entry *e = malloc(sizeof(Entry));
+	Entry *e = (Entry*)malloc(sizeof(Entry));
 	//printf("malloc Entry: %d\n",sizeof(Entry));
 	if (!e) return NULL;
 	e->path = path;
@@ -52,7 +52,7 @@ Entry* newEntry(char* path, int lineNumber) {
 }
 
 char* getRandomString() {
-	char* res = malloc(10*sizeof(char));
+	char* res = (char*)malloc(10*sizeof(char));
 	int i;
 	for (i=0;i<9;i++) {
 		res[i]=rand()%24+65;
@@ -61,19 +61,10 @@ char* getRandomString() {
 	return res;
 }
 
-char* getMemoryRepr(char* buffer, unsigned int i) {
-	if (i>=10000000) {
-		sprintf(buffer,"%4uMB",i/1000000);
-	} else if (i>=10000) {
-		sprintf(buffer,"%4uKB",i/1000);
-	} else {
-		sprintf(buffer,"%4uB",i);
-	}
-	return buffer;
-}
+
 
 char* newString(char* c, unsigned int length) {
-	char* res = malloc((length+1)*sizeof(char));
+	char* res = (char*)malloc((length+1)*sizeof(char));
 	//printf("malloc char: %d\n",(length+1)*sizeof(char));
 	//memData+=(length+1)*sizeof(char);
 	unsigned int i;
@@ -113,13 +104,12 @@ int filterLine(char* buffer) {
 	return 0;
 }
 
-void findAllNames(char* key) {
-	clock_gettime(TIMING_MODE,&start);
+int findAllNames(char* key) {
 	List* ls = GetListFromMap(allTokens,key);
 	if (ls) {
 		if (ls->size>maxPrintLines) {
 			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
-			return;
+			return 0 ;
 		}
 		unsigned int i;
 		for (i=0;i<ls->size;i++) {
@@ -129,22 +119,20 @@ void findAllNames(char* key) {
 				printf("%s%s: %s%s%s\n",FILE_NAME_COLOR,fi,HIGHLIGHT_COLOR,key,NORMAL_COLOR);
 			}
 		}
-		clock_gettime(TIMING_MODE,&end);
-		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
-		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
-			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
+		printf("    %sQuery complete %d occurences of '%s' found ",SUMMARY_COLOR,ls->size,key);
+		return 1;
 	} else {
 		printf("    no occurence of '%s' found\n",key);
+		return 0;
 	}
 }
 
-void findSymbolLocations(char* key) {
-	clock_gettime(TIMING_MODE,&start);
+int findSymbolLocations(char* key) {
 	List* ls = GetListFromMap(allTokens,key);
 	if (ls) {
 		if (ls->size>maxPrintLines) {
 			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
-			return;
+			return 0;
 		}
 		unsigned int i;
 		for (i=0;i<ls->size;i++) {
@@ -154,22 +142,37 @@ void findSymbolLocations(char* key) {
 				printf("%s%s: %s%s%s\n",FILE_NAME_COLOR,fi,HIGHLIGHT_COLOR,key,NORMAL_COLOR);
 			}
 		}
-		clock_gettime(TIMING_MODE,&end);
-		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
-		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
-			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
+		printf("    %sQuery complete %d occurences of '%s' found ",SUMMARY_COLOR,ls->size,key);
+		return 1;
 	} else {
 		printf("    no occurence of '%s' found\n",key);
+		return 0;
 	}
 }
 
-void findAllOccurences(char* key) {
-	clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&start);
-	List* ls = GetListFromMap(allTokens,key);
-	if (ls) {
+int findAllOccurences(char* input) {
+	char delimiter[] = " ";
+	char* key = strtok(input, delimiter);
+	List *ls, *lsx;
+	ls = GetListFromMap(allTokens, key);
+	while (1) {
+		//printf("Using key %s\n",key);
+		key = strtok(NULL, delimiter);
+		if (!key) break;
+		lsx = GetListFromMap(allTokens, key);
+		// if (!ls) ls = lsx;
+		// else {
+			List* newList = IntersectList(ls, lsx);
+			//DeleteList(ls);
+			ls = newList;
+		//}
+		
+	}
+	//List* ls = GetListFromMap(allTokens,key);
+	if (ls&&ls->size>0) {
 		if (ls->size>maxPrintLines) {
 			printf("    %sQuery complete. Too many results (%d) to display.%s",SUMMARY_COLOR,ls->size,NORMAL_COLOR);
-			return;
+			return 0;
 		}
 		unsigned int i;
 		for (i=0;i<ls->size;i++) {
@@ -179,10 +182,10 @@ void findAllOccurences(char* key) {
 			if (!li||!line||!linesFromFile) printf("Warning: null pointer or index out of bounds!\n");
 			else {
 				unsigned int formattedLineLength = strlen(line)+strlen(HIGHLIGHT_COLOR)+strlen(NORMAL_COLOR)+3;
-				char* formattedLine = malloc(formattedLineLength*sizeof(char));
-				char* token = malloc(BUFFER_SIZE*sizeof(char));
-				char* leftSubstring = malloc(BUFFER_SIZE*sizeof(char));
-				char* rightSubstring = malloc(BUFFER_SIZE*sizeof(char));
+				char* formattedLine = (char*)malloc(formattedLineLength*sizeof(char));
+				char* token = (char*)malloc(BUFFER_SIZE*sizeof(char));
+				char* leftSubstring = (char*)malloc(BUFFER_SIZE*sizeof(char));
+				char* rightSubstring = (char*)malloc(BUFFER_SIZE*sizeof(char));
 				unsigned int i,tokenIndex=0;
 				for (i=0;i<strlen(line);i++) {
 					if (!line[i]||line[i]=='\n') break;
@@ -191,13 +194,13 @@ void findAllOccurences(char* key) {
 						token[tokenIndex++]=line[i];
 					} else if (tokenIndex>0) {
 						token[tokenIndex]='\0';
-						if (strcmp(key,token)==0) break;
+						if (strcmp(input,token)==0) break;
 						else tokenIndex=0;
 					}
 				}
 				strncpy(leftSubstring,line,i-tokenIndex); leftSubstring[i-tokenIndex]='\0';
 				strcpy(rightSubstring,line+i);
-				snprintf(formattedLine,formattedLineLength,"%s%s%s%s%s",leftSubstring,HIGHLIGHT_COLOR,key,NORMAL_COLOR,rightSubstring);
+				snprintf(formattedLine,formattedLineLength,"%s%s%s%s%s",leftSubstring,HIGHLIGHT_COLOR,input,NORMAL_COLOR,rightSubstring);
 				printf("%s%s:%s%d%s %s\n",FILE_NAME_COLOR,li->path,LINE_NUMBER_COLOR,li->lineNumber,NORMAL_COLOR,formattedLine);
 				free(formattedLine);
 				free(token);
@@ -205,12 +208,11 @@ void findAllOccurences(char* key) {
 				free(rightSubstring);
 			}
 		}
-		clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&end);
-		unsigned int diff_usec = (end.tv_nsec-start.tv_nsec)/1000;
-		printf("    %sQuery complete (%.3fms) %d occurences of '%s' found%s",
-			SUMMARY_COLOR,(float)(diff_usec)/1000,ls->size,key,NORMAL_COLOR);
+		printf("    %sQuery complete %d occurences of '%s' found ",SUMMARY_COLOR,ls->size,input);
+		return 1;
 	} else {
-		printf("    no occurence of '%s' found\n",key);
+		printf("    no occurence of '%s' found\n",input);
+		return 0;
 	}
 }
 
@@ -307,7 +309,7 @@ int parseFromFile(char* fileName) {
 						token[tokenIndex]='\0';
 						//printf("%s ",token);
 						tokenIndex=0;
-						countTokens+=AddToMap(allTokens,token,newEntry(filepath,lineNumber));
+						countTokens+=AddToMap(allTokens,token,thisLine);
 					}
 				}
 				//printf("\n");
@@ -543,48 +545,33 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	printf("Reading from directory %s ...\n",directory_name);
-	clock_gettime(TIMING_MODE,&start);
+	timer = TimerStart();
 	if (!parseFromDirectory(inc_filters,exc_filters)) {
 		printf("Cannot parse directory %s!\n",directory_name);
 		return 1;
 	}
-	clock_gettime(TIMING_MODE,&end);
-	unsigned long diff_usec = (end.tv_sec-start.tv_sec)*1000000 + (end.tv_nsec-start.tv_nsec)/1000;
 	if (currentMode==SYMBOL_MODE) {
 		printf("Found %d symbols (%d unique).\n",countTokens,allTokens->size);
 		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countLibraries,countExcluded,countDirectories);
-		//memPointers+=sizeof(Map)+sizeof(HashTable)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
 	} else if (currentMode==FILE_MODE) {
 		printf("Found %d filenames (%d unique).\n",countTokens,allTokens->size);
 		printf("Inc. files: %d Exc. files: %d Dirs: %d\n",countTokens,countExcluded,countDirectories);
-		//memPointers+=sizeof(Map)+sizeof(List)*allTokens->size+sizeof(void*)*allTokens->tb->size;
 	} else {
 		printf("Found %d tokens (%d unique) in %d lines.\n",countTokens,allTokens->size,countLines);
 		printf("Included: %d Excluded: %d Dirs: %d\n",allLinesFromFile->load,countExcluded,countDirectories);
-		//memPointers+=sizeof(Map)+sizeof(HashTable)*2+sizeof(List)*(allTokens->size+allLinesFromFile->load)+sizeof(Entry)*countTokens+sizeof(void*)*(allTokens->tb->size+allLinesFromFile->size);
 	}
-	//printf("Memory estimate: %s (data) ",getMemoryRepr(bf,memData));
-	//printf("%s (pointers)\n",getMemoryRepr(bf,memPointers));
-	FILE *f = fopen("/proc/self/statm","r");
-	unsigned int vmsize,vmrss;
-	if(f){
-		if (fscanf(f,"%u %u",&vmsize,&vmrss)==2) {
-			printf("VmSize: %s ",getMemoryRepr(bf,vmsize*4000));
-			printf("VmRSS: %s\n",getMemoryRepr(bf,vmrss*4000));
-		}
-		fclose(f);
-	}
-	printf("Parsing completed (%.3fms)\n",(double)(diff_usec)/1000);
-
-	//writeStringListToHTL("test.htl",FindInHashTable(allLinesFromFile,"Map.h"));
-	//readFromHTL("test.htl");
+	printf("Memory estimate: %s \n",GetMemoryRepr(bf,MemoryInfo()));
+	printf("Parsing completed: (%.3fms)\n",TimerEnd(timer)*1000);
 	printf(">>");
 	while (fgets(bf,BUFFER_SIZE,stdin)) {
+		timer = TimerStart();
 		if (strlen(bf)<=1) break;
 		if (bf[strlen(bf)-1] == '\n') bf[strlen(bf)-1] = '\0';
-		if (currentMode==SYMBOL_MODE) findSymbolLocations(bf);
-		else if (currentMode==FILE_MODE) findAllNames(bf);
-		else findAllOccurences(bf);
+		int success;
+		if (currentMode==SYMBOL_MODE) success=findSymbolLocations(bf);
+		else if (currentMode==FILE_MODE) success=findAllNames(bf);
+		else success=findAllOccurences(bf);
+		if (success) printf(" (%.3fms)%s",TimerEnd(timer)*1000,NORMAL_COLOR);
 		printf("\n>>");
 	}
 	unsigned int i;

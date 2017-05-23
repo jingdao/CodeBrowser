@@ -1,12 +1,12 @@
 CC = gcc
 CFLAGS = -O2 
 LDFLAGS = -lrt /usr/lib/x86_64-linux-gnu/libmagic.so.1
-SOURCES = Map.c List.c HashTable.c
+SOURCES = Map.c List.c HashTable.c Profiler.c
 ALL_SOURCES = CodeBrowser.c $(SOURCES)
-HEADERS = Map.h List.h HashTable.h
+HEADERS = Map.h List.h HashTable.h Profiler.h
 SHARED_OBJECT = libMap.so
 SHARED_OBJECT_FLAGS = -shared -fPIC
-OBJ = Map.o List.o HashTable.o
+OBJ = Map.o List.o HashTable.o Profiler.o
 ALL_OBJ = CodeBrowser.o $(OBJ)
 EXECUTABLE = CodeBrowser
 
